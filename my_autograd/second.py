@@ -1,9 +1,9 @@
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Tuple, Optional
 
 
 class Node:
-    def __init__(self, parents, recipe):
+    def __init__(self, parents: Tuple["Node", ...], recipe: Optional[Recipe]):
         self.parents = parents
         self.recipe = recipe
 
@@ -24,7 +24,7 @@ class Recipe:
 
 
 class Box:
-    def __init__(self, value, node):
+    def __init__(self, value: float, node: Node):
         self.value = value
         self.node = node
 
@@ -45,11 +45,42 @@ def unbox_args(args):
             res.append(arg)
     return tuple(res)
 
+
+def primitive(function):
+    def wrapper(*args, **kwargs):
+        boxed_args = find_boxed_args(args)
+        if not boxed_args:
+            return function(*args, **kwargs)
+
+        unboxed_args = unbox_args(args)
+        result = function(*unboxed_args, **kwargs)
+        parents = tuple(box.node for _, box in boxed_args)
+        argnums = tuple(i for i, _ in boxed_args)
+        recipe = Recipe(
+            function=function,
+            result=result,
+            args=unboxed_args,
+            kwargs=kwargs,
+            argnums=argnums
+        )
+        node = Node(parents, recipe)
+        return Box(result, node)
+    return wrapper
+
+@primitive
+def add(x, y):
+    return x + y
+
+
+
 if __name__ == '__main__':
     root = Node.new_root()
-    # args = (Box(2.0, root), 3.0)
-
     x = Box(2.0, root)
+    y = add(x, 3.0)
 
-    assert find_boxed_args((x, 3.0)) == ((0, x),)
-    assert unbox_args((x, 3.0)) == (2.0, 3.0)
+    assert isinstance(y, Box)
+    assert y.value == 5.0
+    assert y.node.parents == (root,)
+    print(y.node.recipe.argnums)
+    assert y.node.recipe.args == (2.0, 3.0)
+    assert y.node.recipe.argnums == (0,)
