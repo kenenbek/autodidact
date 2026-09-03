@@ -89,14 +89,33 @@ def multiply(x, y):
 
 
 if __name__ == '__main__':
+    # Ordinary calls remain ordinary.
+    assert add(2.0, 3.0) == 5.0
+    assert multiply(2.0, 3.0) == 6.0
+
+    # One traced argument.
     root = Node.new_root()
     x = Box(2.0, root)
-    a = x * x
-    y = a + 3
+    y = add(x, 3.0)
 
-    assert a.value == 4.0
-    assert a.node.parents == (root, root)
+    assert y.value == 5.0
+    assert y.node.parents == (root,)
+    assert y.node.recipe.argnums == (0,)
 
-    assert y.value == 7.0
-    assert y.node.parents == (a.node,)
-    assert y.node.recipe.args == (4.0, 3.0)
+    # Two traced arguments.
+    y = multiply(x, x)
+
+    assert y.value == 4.0
+    assert y.node.parents == (root, root)
+    assert y.node.recipe.argnums == (0, 1)
+
+    # Chained tracing.
+    z = x * x + 3.0
+
+    assert z.value == 7.0
+    assert len(z.node.parents) == 1
+    assert z.node.parents[0].parents == (root, root)
+
+    # Stable forward values.
+    x.value = 10.0
+    assert z.node.parents[0].recipe.args == (2.0, 2.0)
