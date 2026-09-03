@@ -3,7 +3,7 @@ from typing import Any, Callable, Tuple, Optional
 
 
 class Node:
-    def __init__(self, parents: Tuple["Node", ...], recipe: Optional[Recipe]):
+    def __init__(self, parents: Tuple["Node", ...], recipe: Optional["Recipe"]):
         self.parents = parents
         self.recipe = recipe
 
@@ -28,6 +28,17 @@ class Box:
         self.value = value
         self.node = node
 
+    def __add__(self, other):
+        return add(self, other)
+
+    def __radd__(self, other):
+        return self.__add__(other)
+
+    def __mul__(self, other):
+        return multiply(self, other)
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
 
 def find_boxed_args(args):
     res = []
@@ -71,16 +82,21 @@ def primitive(function):
 def add(x, y):
     return x + y
 
+@primitive
+def multiply(x, y):
+    return x * y
+
 
 
 if __name__ == '__main__':
     root = Node.new_root()
     x = Box(2.0, root)
-    y = add(x, 3.0)
+    a = x * x
+    y = a + 3
 
-    assert isinstance(y, Box)
-    assert y.value == 5.0
-    assert y.node.parents == (root,)
-    print(y.node.recipe.argnums)
-    assert y.node.recipe.args == (2.0, 3.0)
-    assert y.node.recipe.argnums == (0,)
+    assert a.value == 4.0
+    assert a.node.parents == (root, root)
+
+    assert y.value == 7.0
+    assert y.node.parents == (a.node,)
+    assert y.node.recipe.args == (4.0, 3.0)
