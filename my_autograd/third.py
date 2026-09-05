@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Callable, Tuple, Optional
+from functools import wraps
 
 
 class Node:
@@ -58,6 +59,7 @@ def unbox_args(args):
 
 
 def primitive(function):
+    @wraps(function)
     def wrapper(*args, **kwargs):
         boxed_args = find_boxed_args(args)
         if not boxed_args:
@@ -68,7 +70,7 @@ def primitive(function):
         parents = tuple(box.node for _, box in boxed_args)
         argnums = tuple(i for i, _ in boxed_args)
         recipe = Recipe(
-            function=function,
+            function=wrapper,
             result=result,
             args=unboxed_args,
             kwargs=kwargs,
