@@ -706,6 +706,29 @@ Do not treat the two edges in `a.node.parents == (root, root)` as duplicate mist
 
 ## 6. Add a gradient-contribution helper
 
+From this point onward, arrange `third.py` in this order so every name exists before it is used:
+
+```text
+imports
+Node, Recipe, Box
+find_boxed_args, unbox_args
+primitive
+add, multiply
+primitive_vjps
+defvjp
+add/multiply VJP registrations
+topological_sort
+add_outgrads
+get_vjp_rule
+backward_pass
+trace
+make_vjp
+test functions
+if __name__ == "__main__"
+```
+
+You do not need separate modules yet. Keeping Section 4 in one file makes it easier to inspect the entire data flow.
+
 During one backward pass, multiple paths can reach the same parent. Add a small helper with this behavior:
 
 ```python
@@ -720,9 +743,210 @@ def add_outgrads(previous, contribution):
     ...
 ```
 
+Use this implementation skeleton:
+
+```python
+def add_outgrads(previous, contribution):
+    """Combine one new gradient contribution with an existing total."""
+    if previous is None:
+        # TODO: There is no existing total. What should be returned?
+        ...
+
+    # TODO: Two paths reached the same node. Combine their messages.
+    ...
+```
+
+Test this helper completely before connecting it to graph traversal:
+
+```python
+def test_add_outgrads():
+    assert add_outgrads(None, 3.0) == 3.0
+    assert add_outgrads(3.0, 4.0) == 7.0
+    assert add_outgrads(-2.0, 2.0) == 0.0
+```
+
+Mental checkpoint: `None` means “no message has arrived yet.” It does not mean a numerical gradient of zero.
+
 This helper replaces mutation such as `parent.grad += contribution`.
 
-## 7. Implement `backward_pass`
+## 7. Implement `get_vjp_rule`
+
+Before `backward_pass` can propagate anything, it needs a reliable way to retrieve one local derivative rule.
+
+The registry has two lookup levels:
+
+```text
+primitive_vjps[function][argnum]
+               |         |
+               |         +-- which argument of that primitive?
+               +------------ which primitive created the node?
+```
+
+For example:
+
+```text
+primitive_vjps[multiply][0] -> rule for the left input
+primitive_vjps[multiply][1] -> rule for the right input
+```
+
+Give that lookup a small interface:
+
+```python
+def get_vjp_rule(function, argnum):
+    ...
+```
+
+Its contract is:
+
+```text
+input:
+    function -> the exact primitive wrapper stored in Recipe.function
+    argnum  -> the original positional argument number
+
+output:
+    one callable with signature
+    rule(g, result, *args, **kwargs) -> parent contribution
+
+failure:
+    raise NotImplementedError when the pair has no registered rule
+```
+
+### Why use a helper instead of indexing directly?
+
+You could write this inside `backward_pass`:
+
+```python
+rule = primitive_vjps[recipe.function][argnum]
+```
+
+But a raw dictionary failure would produce an unhelpful `KeyError`. It would not clearly tell you whether:
+
+- The primitive itself was never registered.
+- The primitive exists but this argument number is missing.
+- The recipe stored the raw function while registration used the wrapper.
+
+`get_vjp_rule` gives all lookup and error behavior one home. `backward_pass` can then focus only on graph traversal.
+
+### Implement it in three small steps
+
+Use this skeleton:
+
+```python
+def get_vjp_rule(function, argnum):
+    """Return the VJP registered for one primitive argument."""
+
+    # Step 1: retrieve all rules registered for this primitive.
+    function_rules = primitive_vjps.get(function)
+
+    # Step 2: distinguish a missing primitive from a valid rule mapping.
+    if function_rules is None:
+        function_name = getattr(function, "__name__", repr(function))
+        raise NotImplementedError(
+            f"No VJPs registered for primitive {function_name!r}"
+        )
+
+    # Step 3: retrieve the rule for the requested argument position.
+    # TODO: Check whether argnum is present. If not, raise a clear error.
+    if ...:
+        function_name = getattr(function, "__name__", repr(function))
+        raise NotImplementedError(
+            f"No VJP registered for primitive {function_name!r} "
+            f"argument {argnum}"
+        )
+
+    # TODO: Return the callback stored at argnum.
+    ...
+```
+
+The meaningful work left to you is deciding:
+
+- How to test whether `argnum` is absent.
+- How to return the callback when it is present.
+
+Do not call the returned rule inside this helper. Retrieval and execution are separate responsibilities:
+
+```python
+rule = get_vjp_rule(recipe.function, argnum)
+contribution = rule(outgrad, recipe.result, *recipe.args, **recipe.kwargs)
+```
+
+### Test the successful lookup first
+
+```python
+def test_get_vjp_rule_for_multiply():
+    left_rule = get_vjp_rule(multiply, 0)
+    right_rule = get_vjp_rule(multiply, 1)
+
+    assert left_rule is primitive_vjps[multiply][0]
+    assert right_rule is primitive_vjps[multiply][1]
+
+    assert left_rule(1.0, 6.0, 2.0, 3.0) == 3.0
+    assert right_rule(1.0, 6.0, 2.0, 3.0) == 2.0
+```
+
+### Then test both failure levels
+
+Missing primitive:
+
+```python
+@primitive
+def subtract(x, y):
+    return x - y
+
+try:
+    get_vjp_rule(subtract, 0)
+except NotImplementedError as error:
+    assert "subtract" in str(error)
+else:
+    raise AssertionError("Expected a missing-primitive VJP error")
+```
+
+Missing argument position:
+
+```python
+@primitive
+def left_only(x, y):
+    return x + y
+
+defvjp(left_only, lambda g, result, x, y: g)
+
+assert get_vjp_rule(left_only, 0) is primitive_vjps[left_only][0]
+
+try:
+    get_vjp_rule(left_only, 1)
+except NotImplementedError as error:
+    assert "argument 1" in str(error)
+else:
+    raise AssertionError("Expected a missing-argument VJP error")
+```
+
+### Function identity checkpoint
+
+This assertion must pass before debugging the registry:
+
+```python
+root = Node.new_root()
+x = Box(2.0, root)
+result = multiply(x, 3.0)
+
+assert result.node.recipe.function is multiply
+```
+
+If it fails, `get_vjp_rule` is receiving a different function object from the registry key. Fix recipe recording in `primitive`; do not work around it by comparing function names.
+
+The mental model is:
+
+```text
+Recipe says: "multiply created me; follow argument 1"
+                         |
+                         v
+get_vjp_rule(multiply, 1)
+                         |
+                         v
+callback that computes g * x
+```
+
+## 8. Implement `backward_pass`
 
 Use this interface:
 
@@ -785,9 +1009,79 @@ def backward_pass(seed, end_node, start_node):
     return outgrads[start_node]
 ```
 
+Build the function in four explicit blocks. This longer skeleton makes the responsibilities visible while leaving the important expressions for you:
+
+```python
+def backward_pass(seed, end_node, start_node):
+    """Propagate one output-side seed back to the traced input."""
+
+    # Block 1: prepare one independent backward evaluation.
+    order = topological_sort(end_node)
+    outgrads = {
+        end_node: seed,
+    }
+
+    # Block 2: process output first and move toward the root.
+    for node in reversed(order):
+        if node.recipe is None:
+            # Root nodes have no operation to differentiate.
+            continue
+
+        outgrad = outgrads[node]
+        recipe = node.recipe
+
+        # Block 3: send one contribution through every parent edge.
+        for argnum, parent in zip(recipe.argnums, node.parents):
+            rule = get_vjp_rule(
+                function=recipe.function,
+                argnum=argnum,
+            )
+
+            parent_contribution = rule(
+                outgrad,
+                recipe.result,
+                *recipe.args,
+                **recipe.kwargs,
+            )
+
+            previous_total = outgrads.get(parent)
+            outgrads[parent] = add_outgrads(
+                previous_total,
+                parent_contribution,
+            )
+
+    # Block 4: answer the backward query for the original input.
+    # TODO: Return the accumulated message for start_node.
+    ...
+```
+
+Although most control flow is shown, you still need to reason about these questions:
+
+- Why is the traversal reversed?
+- Why does `outgrads[node]` already contain every downstream contribution when the node is processed?
+- Why must `zip(recipe.argnums, node.parents)` preserve duplicate parents?
+- Why is `outgrads` created inside the function rather than stored globally?
+
+Add a temporary diagnostic version while learning:
+
+```python
+def describe_backward_step(node, outgrad):
+    if node.recipe is None:
+        return "root"
+
+    return {
+        "function": node.recipe.function.__name__,
+        "outgrad": outgrad,
+        "argnums": node.recipe.argnums,
+        "parent_count": len(node.parents),
+    }
+```
+
+You may print this inside the traversal while debugging, but remove or disable the print after the assertions pass.
+
 Unlike `first.py`, this function never writes `node.grad`. Calling it twice creates two independent dictionaries and cannot reuse stale intermediate gradients.
 
-## 8. Trace a single-input function
+## 9. Trace a single-input function
 
 Implement a small helper:
 
@@ -795,6 +1089,55 @@ Implement a small helper:
 def trace(function, x):
     ...
 ```
+
+Use this code shape:
+
+```python
+def trace(function, x):
+    """Run one forward function while recording operations involving x."""
+
+    # Create the graph identity of the input.
+    start_node = Node.new_root()
+
+    # Give the raw value a graph identity while it flows through function.
+    start_box = Box(
+        value=x,
+        node=start_node,
+    )
+
+    # Run the user's function exactly once.
+    output = function(start_box)
+
+    # TODO: Decide whether output is a Box.
+    if ...:
+        # Connected result: return raw value and graph endpoints.
+        return ..., ..., start_node
+
+    # Input-independent result: there is no end node to backpropagate from.
+    return ..., None, start_node
+```
+
+Write two tiny tests before moving to `make_vjp`:
+
+```python
+def test_trace_connected_output():
+    value, end_node, start_node = trace(lambda x: x*x, 3.0)
+
+    assert value == 9.0
+    assert end_node is not None
+    assert start_node.recipe is None
+    assert end_node.recipe.function is multiply
+
+
+def test_trace_constant_output():
+    value, end_node, start_node = trace(lambda x: 7.0, 3.0)
+
+    assert value == 7.0
+    assert end_node is None
+    assert start_node.recipe is None
+```
+
+Keep `trace` focused on the forward phase. It should not access the VJP registry or calculate a gradient.
 
 Its flow is:
 
@@ -834,7 +1177,7 @@ assert end is None
 
 At this stage, any returned `Box` is considered connected to the current input. Trace IDs for distinguishing nested traces belong to a later section.
 
-## 9. Implement `make_vjp`
+## 10. Implement `make_vjp`
 
 Use the roadmap interface:
 
@@ -872,9 +1215,61 @@ def make_vjp(function, x):
     return vjp, result
 ```
 
+Here is a more implementation-shaped version with the mathematical choices left blank:
+
+```python
+def make_vjp(function, x):
+    """Trace function at x and return a reusable reverse-pass closure."""
+
+    result, end_node, start_node = trace(function, x)
+
+    if end_node is None:
+        def vjp(seed):
+            # TODO: The output did not depend on x.
+            # What gradient should be returned for every seed?
+            ...
+    else:
+        def vjp(seed):
+            # TODO: Delegate to backward_pass using the captured graph.
+            ...
+
+    return vjp, result
+```
+
+Notice what the closure captures:
+
+```text
+end_node
+start_node
+```
+
+It does not need to capture `function` or rerun it. The recipes already contain everything required by the reverse pass.
+
+Use an execution counter to verify that tracing happens once:
+
+```python
+def test_make_vjp_runs_forward_once():
+    calls = 0
+
+    def function(x):
+        nonlocal calls
+        calls += 1
+        return x*x
+
+    vjp, result = make_vjp(function, 3.0)
+
+    assert calls == 1
+    assert result == 9.0
+
+    vjp(1.0)
+    vjp(2.0)
+
+    assert calls == 1
+```
+
 The forward function must run only once when `make_vjp` is called, not again every time the returned VJP is evaluated.
 
-## 10. Test the VJP seed explicitly
+## 11. Test the VJP seed explicitly
 
 The seed is part of the VJP contract; it is not always `1.0`.
 
@@ -889,7 +1284,19 @@ assert vjp(-1.0) == -6.0
 
 Section 5's `grad()` will later choose `1.0` automatically for scalar outputs.
 
-## 11. Test argument-number lookup
+Structure the test as a named function so failures identify the concept being tested:
+
+```python
+def test_seed_scales_vjp():
+    vjp, result = make_vjp(lambda x: x*x, 3.0)
+
+    assert result == 9.0
+    assert vjp(1.0) == 6.0
+    assert vjp(2.0) == 12.0
+    assert vjp(-1.0) == -6.0
+```
+
+## 12. Test argument-number lookup
 
 Test both operand positions so an `argnums` or registry-indexing mistake cannot hide:
 
@@ -903,7 +1310,25 @@ assert right_vjp(1.0) == 3.0
 
 In the first graph, `argnums == (0,)`. In the second, `argnums == (1,)`.
 
-## 12. Test shared and branched paths
+If this test fails, inspect the recorded recipes before inspecting calculus:
+
+```python
+def test_argument_positions_are_recorded():
+    root = Node.new_root()
+    x = Box(2.0, root)
+
+    left = multiply(x, 3.0)
+    right = multiply(3.0, x)
+
+    assert left.node.recipe.argnums == (0,)
+    assert right.node.recipe.argnums == (1,)
+    assert left.node.parents == (root,)
+    assert right.node.parents == (root,)
+```
+
+This separates a forward-recording error from a backward-registry error.
+
+## 13. Test shared and branched paths
 
 These cases verify contribution accumulation:
 
@@ -923,7 +1348,28 @@ assert vjp(1.0) == 27.0
 
 The last expression is parsed as `(x*x)*x`, so it contains an intermediate node and exercises a deeper graph.
 
-## 13. Verify that VJPs are reusable
+Keep separate tests for the three graph shapes:
+
+```python
+def test_shared_parent():
+    # x is used twice by one primitive node.
+    vjp, _ = make_vjp(lambda x: x*x, 3.0)
+    assert vjp(1.0) == 6.0
+
+
+def test_branch_merge():
+    # The root receives messages through multiply and directly through add.
+    vjp, _ = make_vjp(lambda x: x*x + x, 3.0)
+    assert vjp(1.0) == 7.0
+
+
+def test_deep_graph():
+    # The backward pass must process the outer multiply before the inner one.
+    vjp, _ = make_vjp(lambda x: x*x*x, 3.0)
+    assert vjp(1.0) == 27.0
+```
+
+## 14. Verify that VJPs are reusable
 
 Unlike `Node.backward()` in `first.py`, a VJP evaluation should not retain gradients:
 
@@ -937,7 +1383,24 @@ assert vjp(2.0) == 54.0
 
 Each call begins with a new local `outgrads` dictionary. Results are returned, not accumulated into leaf objects.
 
-## 14. Test an input-independent result
+Turn the old `72 instead of 54` bug into a regression test:
+
+```python
+def test_vjp_has_no_stale_intermediate_state():
+    vjp, _ = make_vjp(lambda x: x*x*x, 3.0)
+
+    first = vjp(1.0)
+    second = vjp(1.0)
+    scaled = vjp(2.0)
+
+    assert first == 27.0
+    assert second == 27.0
+    assert scaled == 54.0
+```
+
+Do not add the first and second results together inside the engine. A VJP is a function that answers one query; it does not behave like a mutable `.grad` field.
+
+## 15. Test an input-independent result
 
 ```python
 vjp, result = make_vjp(lambda x: 7.0, 3.0)
@@ -949,7 +1412,18 @@ assert vjp(100.0) == 0.0
 
 The seed cannot create a dependency that did not exist in the forward computation.
 
-## 15. Add a useful missing-rule failure
+Suggested test structure:
+
+```python
+def test_constant_function_has_zero_vjp():
+    vjp, result = make_vjp(lambda x: 7.0, 3.0)
+
+    assert result == 7.0
+    assert vjp(1.0) == 0.0
+    assert vjp(100.0) == 0.0
+```
+
+## 16. Add a useful missing-rule failure
 
 If a primitive participates in a trace but has no registered rule, fail at backward time with a message containing:
 
@@ -964,7 +1438,64 @@ No VJP registered for primitive 'subtract' argument 0
 
 Do not silently return zero. A missing derivative implementation is different from a mathematically zero derivative.
 
-Hint: perform an explicit registry membership check before indexing the mapping, then raise `NotImplementedError`.
+Section 7 already tests `get_vjp_rule` directly. Now confirm the same error travels through the complete call chain:
+
+```text
+vjp(seed)
+-> backward_pass
+-> inspect node recipe
+-> get_vjp_rule
+-> raise NotImplementedError
+```
+
+Test both kinds of missing lookup:
+
+```python
+def test_missing_primitive_rule_is_clear():
+    @primitive
+    def subtract(x, y):
+        return x - y
+
+    vjp, _ = make_vjp(lambda x: subtract(x, 1.0), 3.0)
+
+    try:
+        vjp(1.0)
+    except NotImplementedError as error:
+        assert "subtract" in str(error)
+        assert "argument 0" in str(error)
+    else:
+        raise AssertionError("Expected a missing-VJP error")
+```
+
+Do not register `subtract` after this test; it is deliberately outside the Section 4 primitive set.
+
+## Suggested test runner structure
+
+Keep the bottom of `third.py` readable by calling named tests:
+
+```python
+def run_section_4_tests():
+    test_add_outgrads()
+    test_get_vjp_rule_for_multiply()
+    test_trace_connected_output()
+    test_trace_constant_output()
+    test_make_vjp_runs_forward_once()
+    test_seed_scales_vjp()
+    test_argument_positions_are_recorded()
+    test_shared_parent()
+    test_branch_merge()
+    test_deep_graph()
+    test_vjp_has_no_stale_intermediate_state()
+    test_constant_function_has_zero_vjp()
+    test_missing_primitive_rule_is_clear()
+
+
+if __name__ == "__main__":
+    run_section_4_tests()
+    print("Section 4 passed")
+```
+
+This is intentionally not a complete implementation: the core `TODO` expressions still require you to connect the data flow and choose the correct mathematical values.
 
 ## Recommended implementation order
 
@@ -979,11 +1510,12 @@ Work in small passing increments:
 6. Test rules directly
 7. Add topological_sort
 8. Add add_outgrads
-9. Implement backward_pass
-10. Implement trace
-11. Implement make_vjp
-12. Add end-to-end assertions
-13. Add the missing-rule error
+9. Implement and directly test get_vjp_rule
+10. Implement backward_pass
+11. Implement trace
+12. Implement make_vjp
+13. Add end-to-end assertions
+14. Verify the missing-rule error through backward_pass
 ```
 
 Run the assertions after every step. When a step fails, keep the test small enough to determine whether the problem is graph construction, registry lookup, traversal order, or contribution accumulation.
