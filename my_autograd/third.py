@@ -179,13 +179,56 @@ def backward_pass(seed, end_node, start_node):
     return outgrads[start_node]
 
 
+def trace(function: Callable, x: float):
+    start_node = Node.new_root()
+    start_box = Box(
+        value=x,
+        node=start_node,
+    )
+    output = function(start_box)
+    if isinstance(output, Box):
+        return output.value, output.node, start_node
+    return output, None, start_node
+
+
+def make_vjp(function, x):
+    result, end_node, start_node = trace(function, x)
+
+    if end_node is None:
+        def vjp(seed):
+            return 0
+    else:
+        def vjp(seed):
+            return backward_pass(seed, end_node, start_node)
+    return vjp, result
+
+def test_shared_parent():
+    # x is used twice by one primitive node.
+    vjp, _ = make_vjp(lambda x: x*x, 3.0)
+    assert vjp(1.0) == 6.0
+
+
+def test_branch_merge():
+    # The root receives messages through multiply and directly through add.
+    vjp, _ = make_vjp(lambda x: x*x + x, 3.0)
+    assert vjp(1.0) == 7.0
+
+
+def test_deep_graph():
+    # The backward pass must process the outer multiply before the inner one.
+    vjp, _ = make_vjp(lambda x: x*x*x, 3.0)
+    assert vjp(1.0) == 27.0
+
+
+
 if __name__ == '__main__':
     defvjp(add, add_left_rule, add_right_rule)
     defvjp(multiply, mul_left_rule, mul_right_rule)
 
-    root = Node.new_root()
-    x = Box(2.0, root)
-    a = x * x
-    y = a + x
+    test_shared_parent()
+    test_branch_merge()
+    test_deep_graph()
+    
+
 
 
