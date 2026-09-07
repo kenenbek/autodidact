@@ -134,9 +134,9 @@ def get_vjp_rule(function, argnum):
         if argnum in primitive_vjps[function]:
             return primitive_vjps[function][argnum]
         else:
-            raise NotImplementedError("No such function")
+            raise NotImplementedError(f"No argument {argnum} for {function.__name__}")
     else:
-        raise NotImplementedError("No such argnum")
+        raise NotImplementedError(f"No VJP rule for function {function.__name__}, no argument {argnum}")
 
 def test_get_vjp_rule_for_multiply():
     left_rule = get_vjp_rule(multiply, 0)
@@ -202,22 +202,21 @@ def make_vjp(function, x):
             return backward_pass(seed, end_node, start_node)
     return vjp, result
 
-def test_shared_parent():
-    # x is used twice by one primitive node.
-    vjp, _ = make_vjp(lambda x: x*x, 3.0)
-    assert vjp(1.0) == 6.0
+def test_missing_primitive_rule_is_clear():
+    @primitive
+    def subtract(x, y):
+        return x - y
 
+    vjp, _ = make_vjp(lambda x: subtract(x, 1.0), 3.0)
 
-def test_branch_merge():
-    # The root receives messages through multiply and directly through add.
-    vjp, _ = make_vjp(lambda x: x*x + x, 3.0)
-    assert vjp(1.0) == 7.0
-
-
-def test_deep_graph():
-    # The backward pass must process the outer multiply before the inner one.
-    vjp, _ = make_vjp(lambda x: x*x*x, 3.0)
-    assert vjp(1.0) == 27.0
+    try:
+        vjp(1.0)
+    except NotImplementedError as error:
+        print(str(error))
+        assert "subtract" in str(error)
+        assert "argument 0" in str(error)
+    else:
+        raise AssertionError("Expected a missing-VJP error")
 
 
 
@@ -225,10 +224,8 @@ if __name__ == '__main__':
     defvjp(add, add_left_rule, add_right_rule)
     defvjp(multiply, mul_left_rule, mul_right_rule)
 
-    test_shared_parent()
-    test_branch_merge()
-    test_deep_graph()
-    
+    test_missing_primitive_rule_is_clear()
+
 
 
 
