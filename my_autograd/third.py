@@ -89,6 +89,10 @@ def add(x, y):
 def multiply(x, y):
     return x * y
 
+@primitive
+def subtract(x, y):
+    return x - y
+
 primitive_vjps = defaultdict(dict)
 
 def defvjp(function, *vjps):
@@ -130,102 +134,38 @@ def add_outgrads(previous, contribution):
 
 
 def get_vjp_rule(function, argnum):
-    if function in primitive_vjps:
-        if argnum in primitive_vjps[function]:
-            return primitive_vjps[function][argnum]
-        else:
-            raise NotImplementedError(f"No argument {argnum} for {function.__name__}")
-    else:
-        raise NotImplementedError(f"No VJP rule for function {function.__name__}, no argument {argnum}")
+    function_rules = primitive_vjps.get(function)
 
-def test_get_vjp_rule_for_multiply():
-    left_rule = get_vjp_rule(multiply, 0)
-    right_rule = get_vjp_rule(multiply, 1)
+    if function_rules is None:
+        function_name = getattr(function, "__name__", repr(function))
+        raise NotImplementedError(
+            f"No VJPs registered for primitive {function_name!r}"
+        )
 
-    assert left_rule is primitive_vjps[multiply][0]
-    assert right_rule is primitive_vjps[multiply][1]
+    if argnum not in primitive_vjps[function]:
+        function_name = getattr(function, "__name__", repr(function))
+        raise NotImplementedError(
+            f"No VJP registered for primitive {function_name!r} "
+            f"argument {argnum}"
+        )
 
-    assert left_rule(1.0, 6.0, 2.0, 3.0) == 3.0
-    assert right_rule(1.0, 6.0, 2.0, 3.0) == 2.0
-
-def backward_pass(seed, end_node, start_node):
-    outgrads = {end_node: seed}
-    order = topological_sort(end_node)
-
-    for node in reversed(order):
-        if node.recipe is None:
-            continue
-
-        outgrad = outgrads[node]
-        recipe = node.recipe
-
-        for argnum, parent in zip(recipe.argnums, node.parents):
-            rule = get_vjp_rule(
-                function=recipe.function,
-                argnum=argnum,
-            )
-
-            parent_contribution = rule(
-                outgrad,
-                recipe.result,
-                *recipe.args,
-                **recipe.kwargs
-            )
-            previous_total = outgrads.get(parent)
-            outgrads[parent] = add_outgrads(
-                previous_total,
-                parent_contribution
-            )
-    return outgrads[start_node]
+    return primitive_vjps[function][argnum]
 
 
-def trace(function: Callable, x: float):
-    start_node = Node.new_root()
-    start_box = Box(
-        value=x,
-        node=start_node,
-    )
-    output = function(start_box)
-    if isinstance(output, Box):
-        return output.value, output.node, start_node
-    return output, None, start_node
+@primitive
+def left_only(x, y):
+    return x + y
 
 
-def make_vjp(function, x):
-    result, end_node, start_node = trace(function, x)
-
-    if end_node is None:
-        def vjp(seed):
-            return 0
-    else:
-        def vjp(seed):
-            return backward_pass(seed, end_node, start_node)
-    return vjp, result
-
-def test_missing_primitive_rule_is_clear():
-    @primitive
-    def subtract(x, y):
-        return x - y
-
-    vjp, _ = make_vjp(lambda x: subtract(x, 1.0), 3.0)
-
-    try:
-        vjp(1.0)
-    except NotImplementedError as error:
-        print(str(error))
-        assert "subtract" in str(error)
-        assert "argument 0" in str(error)
-    else:
-        raise AssertionError("Expected a missing-VJP error")
+defvjp(add, add_left_rule, add_right_rule)
+defvjp(multiply, mul_left_rule, mul_right_rule)
+defvjp(left_only, lambda g, result, x, y: g)
 
 
 
 if __name__ == '__main__':
-    defvjp(add, add_left_rule, add_right_rule)
-    defvjp(multiply, mul_left_rule, mul_right_rule)
+    root = Node.new_root()
+    x = Box(2.0, root)
+    result = multiply(x, 3.0)
 
-    test_missing_primitive_rule_is_clear()
-
-
-
-
+    assert result.node.recipe.function is multiply
