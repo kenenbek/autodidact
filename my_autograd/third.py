@@ -157,6 +157,61 @@ def left_only(x, y):
     return x + y
 
 
+def backward_pass(seed, end_node, start_node):
+    order = topological_sort(end_node)
+    outgrads = {
+        end_node: seed
+    }
+
+    for node in reversed(order):
+        if node.recipe is None:
+            continue
+        outgrad = outgrads[node]
+        recipe = node.recipe
+
+        for argnum, parent in zip(recipe.argnums, node.parents):
+            rule = get_vjp_rule(
+                function=recipe.function,
+                argnum=argnum
+            )
+            parent_contribution = rule(
+                outgrad,
+                recipe.result,
+                **recipe.args,
+                **recipe.kwargs
+            )
+            previous_total = outgrads.get(parent)
+            outgrads[parent] = add_outgrads(previous_total, parent_contribution)
+
+    return outgrads[start_node]
+
+
+def describe_backward_step(node, outgrad):
+    if node.recipe is None:
+        return "root"
+    return {
+        "function": node.recipe.function.__name__,
+        "outgrad": outgrad,
+        "argnums": node.recipe.argnums,
+        "parent_count": len(node.parents)
+    }
+
+
+
+def trace(function, x):
+
+    start_node = Node.new_root()
+    start_box = Box(
+        value=x,
+        node=start_node,
+    )
+    output = function(start_box)
+
+    if type(output) is Box:
+        return output.value, output.node, start_node
+    return output, None, start_node
+
+
 defvjp(add, add_left_rule, add_right_rule)
 defvjp(multiply, mul_left_rule, mul_right_rule)
 defvjp(left_only, lambda g, result, x, y: g)
