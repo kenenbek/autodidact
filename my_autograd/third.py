@@ -212,6 +212,20 @@ def trace(function, x):
     return output, None, start_node
 
 
+def make_vjp(function, x):
+    result, end_node, start_node = trace(function, x)
+
+    if end_node is None:
+        def vjp(seed):
+            return 0
+    else:
+        def vjp(seed):
+            gradient_start_node = backward_pass(seed, end_node, start_node)
+            return gradient_start_node
+
+    return vjp, result
+
+
 defvjp(add, add_left_rule, add_right_rule)
 defvjp(multiply, mul_left_rule, mul_right_rule)
 defvjp(left_only, lambda g, result, x, y: g)
@@ -221,6 +235,34 @@ defvjp(left_only, lambda g, result, x, y: g)
 if __name__ == '__main__':
     root = Node.new_root()
     x = Box(2.0, root)
-    result = multiply(x, 3.0)
+    recorded = multiply(x, 3.0)
 
-    assert result.node.recipe.function is multiply
+    assert recorded.node.recipe.function is multiply
+    assert 0 in primitive_vjps[multiply]
+    assert 1 in primitive_vjps[multiply]
+
+    assert add(2.0, 3.0) == 5.0
+    assert multiply(2.0, 3,0) == 6.0
+
+    vjp, result = make_vjp(lambda x: x*x, 3.0)
+    assert result == 9.0
+    assert vjp(1.0) == 6.0
+    assert vjp(2.0) == 12.0
+
+    vjp, _ = make_vjp(lambda x: 3.0 * x, 2.0)
+    assert vjp(1.0) == 3.0
+
+    vjp, result = make_vjp(lambda x: x * x + x, 3.0)
+    assert result == 12.0
+    assert vjp(1.0) == 7.0
+
+    vjp, result = make_vjp(lambda x: x * x * x, 3.0)
+    assert result == 27.0
+    assert vjp(1.0) == 27.0
+
+    assert vjp(1.0) == 27.0
+    assert vjp(2.0) == 54.0
+
+    vjp, result = make_vjp(lambda x: 7.0, 3.0)
+    assert result == 7.0
+    assert vjp(1.0) == 0.0
