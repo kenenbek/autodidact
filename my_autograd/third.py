@@ -177,7 +177,7 @@ def backward_pass(seed, end_node, start_node):
             parent_contribution = rule(
                 outgrad,
                 recipe.result,
-                **recipe.args,
+                *recipe.args,
                 **recipe.kwargs
             )
             previous_total = outgrads.get(parent)
@@ -233,36 +233,8 @@ defvjp(left_only, lambda g, result, x, y: g)
 
 
 if __name__ == '__main__':
-    root = Node.new_root()
-    x = Box(2.0, root)
-    recorded = multiply(x, 3.0)
+    x = Box(2.0, Node.new_root())
+    y = multiply(x, x)
 
-    assert recorded.node.recipe.function is multiply
-    assert 0 in primitive_vjps[multiply]
-    assert 1 in primitive_vjps[multiply]
-
-    assert add(2.0, 3.0) == 5.0
-    assert multiply(2.0, 3,0) == 6.0
-
-    vjp, result = make_vjp(lambda x: x*x, 3.0)
-    assert result == 9.0
-    assert vjp(1.0) == 6.0
-    assert vjp(2.0) == 12.0
-
-    vjp, _ = make_vjp(lambda x: 3.0 * x, 2.0)
-    assert vjp(1.0) == 3.0
-
-    vjp, result = make_vjp(lambda x: x * x + x, 3.0)
-    assert result == 12.0
-    assert vjp(1.0) == 7.0
-
-    vjp, result = make_vjp(lambda x: x * x * x, 3.0)
-    assert result == 27.0
-    assert vjp(1.0) == 27.0
-
-    assert vjp(1.0) == 27.0
-    assert vjp(2.0) == 54.0
-
-    vjp, result = make_vjp(lambda x: 7.0, 3.0)
-    assert result == 7.0
-    assert vjp(1.0) == 0.0
+    print(y.node.recipe.args)
+    print(y.node.recipe.argnums)

@@ -63,7 +63,7 @@ def test_seed_scales_vjp():
 
 def test_argument_positions_are_recorded():
     left_vjp, _ = make_vjp(lambda x: x*3.0, 2.0)
-    right_vjp, _ = make_vjp(lambda x: 3.0, 2.0)
+    right_vjp, _ = make_vjp(lambda x: x*3.0, 2.0)
 
     assert left_vjp(1.0) == 3.0
     assert right_vjp(1.0) == 3.0
@@ -75,7 +75,7 @@ def test_argument_positions_are_recorded():
     right = multiply(3.0, x)
 
     assert left.node.recipe.argnums == (0, )
-    assert right.node.recipe.argnums == (1, 0)
+    assert right.node.recipe.argnums == (1, )
     assert left.node.parents == (root, )
     assert right.node.parents == (root, )
 

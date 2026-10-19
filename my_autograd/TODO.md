@@ -1,5 +1,19 @@
 # My Autograd TODO
 
+## Guide index and finish line
+
+Sections 1 and 2 are introduced below: the scalar graph and topological backward traversal. The detailed continuation guides are:
+
+- [Section 3: separate values from tracing](SECTION_3_IMPLEMENTATION_PLAN.md)
+- [Section 4: introduce VJPs](SECTION_4_IMPLEMENTATION_PLAN.md)
+- [Section 5: build grad](SECTION_5_IMPLEMENTATION_PLAN.md)
+- [Section 6: NumPy arrays and broadcasting](SECTION_6_IMPLEMENTATION_PLAN.md)
+- [Section 7: higher-order derivatives and nested traces](SECTION_7_IMPLEMENTATION_PLAN.md)
+
+Section 5 completes the scalar first-derivative API. Sections 6 and 7 complete this learning roadmap with array gradients and higher derivatives. Passing the guides' acceptance checks establishes the supported behavior; writing the guide does not establish that the implementation is complete.
+
+This roadmap rebuilds the core ideas of this pedagogical repository. Exact operation-by-operation parity with the original `autograd/` package, or with production Autograd, is a separate follow-up exercise.
+
 If your goal is to learn by rebuilding the whole library, don’t begin with NumPy wrapping. Start with the smallest possible reverse-mode autodiff engine and add machinery only when a test demands it.
 
 Create a separate directory such as `my_autograd/` so the original remains available as a reference—but avoid reading it until you finish each milestone.
