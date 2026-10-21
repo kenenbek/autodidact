@@ -233,8 +233,5 @@ defvjp(left_only, lambda g, result, x, y: g)
 
 
 if __name__ == '__main__':
-    x = Box(2.0, Node.new_root())
-    y = multiply(x, x)
-
-    print(y.node.recipe.args)
-    print(y.node.recipe.argnums)
+    a = multiply(Box(2.0, Node.new_root()), 6.0)
+    b = multiply(Box(3.0, Node.new_root()), 4.0)
