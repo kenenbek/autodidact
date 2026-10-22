@@ -3,6 +3,8 @@ from collections import defaultdict
 from typing import Any, Callable, Tuple, Optional
 from functools import wraps
 
+import numpy as onp
+
 
 class Node:
     def __init__(self, parents: Tuple["Node", ...], recipe: Optional["Recipe"]):
@@ -26,9 +28,33 @@ class Recipe:
 
 
 class Box:
-    def __init__(self, value: float, node: Node):
+    __array_ufunc__ = None
+    def __init__(self, value: Any, node: Node):
         self.value = value
         self.node = node
+
+    @property
+    def shape(self):
+        return onp.shape(self.value)
+
+    @property
+    def ndim(self):
+        return onp.ndim(self.value)
+
+    def __sub__(self, other):
+        return subtract(self, other)
+
+    def __rsub__(self, other):
+        return subtract(other, self)
+
+    def __truediv__(self, other):
+        return divide(self, other)
+
+    def __rtruediv__(self, other):
+        return divide(other, self)
+
+    def __neg__(self):
+        return negative(self)
 
     def __add__(self, other):
         return add(self, other)
@@ -93,6 +119,41 @@ def multiply(x, y):
 def subtract(x, y):
     return x - y
 
+@primitive
+def divide(x, y):
+    return x / y
+
+@primitive
+def negative(x):
+    return -x
+
+@primitive
+def sum_(x, axis=None, keepdims=False):
+    return onp.sum(x, axis=axis, keepdims=keepdims)
+
+@primitive
+def reshape(x, shape):
+    return onp.reshape(x, shape)
+
+@primitive
+def transpose(x):
+    return onp.transpose(x)
+
+@primitive
+def exp(x):
+    return onp.exp(x)
+
+@primitive
+def log(x):
+    return onp.log(x)
+
+@primitive
+def dot(x, y):
+    if not (1 <= onp.ndim(x) <= 2 and 1 <= onp.ndim(y) <= 2):
+        raise ValueError("dot requires rank-1 or rank-2 operands")
+    return onp.dot(x, y)
+
+
 primitive_vjps = defaultdict(dict)
 
 def defvjp(function, *vjps):
@@ -111,6 +172,11 @@ def mul_left_rule(g, result, x, y):
 def mul_right_rule(g, result, x, y):
     return g * x
 
+def div_left_rule(g, result, x, y):
+    return g / y
+
+def div_right_rule(g, result, x, y):
+    return (-1) * g * x / y**2
 
 def topological_sort(end_node):
     topo = []
@@ -217,9 +283,11 @@ def make_vjp(function, x):
 
     if end_node is None:
         def vjp(seed):
-            return 0
+            return onp.zeros_like(x, dtype=float)
     else:
         def vjp(seed):
+            if onp.shape(seed) != onp.shape(result):
+                raise ValueError(f"seed shape {onp.shape(seed)} != output shape {onp.shape(result)}")
             gradient_start_node = backward_pass(seed, end_node, start_node)
             return gradient_start_node
 
@@ -228,8 +296,7 @@ def make_vjp(function, x):
 
 defvjp(add, add_left_rule, add_right_rule)
 defvjp(multiply, mul_left_rule, mul_right_rule)
-defvjp(left_only, lambda g, result, x, y: g)
-
+defvjp(divide, div_left_rule, div_right_rule)
 
 
 if __name__ == '__main__':

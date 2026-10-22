@@ -1,5 +1,5 @@
 import numpy as onp
-from my_autograd.third import make_vjp
+from third import make_vjp
 from functools import wraps
 from fifth import subval
 
@@ -23,7 +23,7 @@ def grad(function, argnum=0):
         vjp, result = make_vjp(unary_function, selected_value)
         if onp.shape(result) != ():
             raise ValueError(
-                        f"grad only supports scalar-output functions, got output with shape {result.shape}"
+                        f"grad only supports scalar-output functions, got output with shape {onp.shape(result)}"
             )
         return vjp(onp.ones_like(result))
 
@@ -32,8 +32,8 @@ def grad(function, argnum=0):
 
 
 if __name__ == '__main__':
-    x = np.array([1., 2.])
+    x = onp.array([1., 2.])
     vjp, result = make_vjp(lambda x: x*x, x)
-    np.testing.assert_allclose(result, [1., 4.])
-    np.testing.assert_allclose(vjp(np.array([3., 4.])), [6., 16.])
-    print(vjp(np.array([3., 4.])))
+    onp.testing.assert_allclose(result, [1., 4.])
+    onp.testing.assert_allclose(vjp(onp.array([3., 4.])), [6., 16.])
+    print(vjp(onp.array([3., 4.])))
