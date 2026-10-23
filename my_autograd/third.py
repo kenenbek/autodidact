@@ -109,23 +109,23 @@ def primitive(function):
 
 @primitive
 def add(x, y):
-    return x + y
+    return onp.add(x, y)
 
 @primitive
 def multiply(x, y):
-    return x * y
+    return onp.multiply(x, y)
 
 @primitive
 def subtract(x, y):
-    return x - y
+    return onp.subtract(x, y)
 
 @primitive
 def divide(x, y):
-    return x / y
+    return onp.divide(x, y)
 
 @primitive
 def negative(x):
-    return -x
+    return onp.negative(x)
 
 @primitive
 def sum_(x, axis=None, keepdims=False):
