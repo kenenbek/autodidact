@@ -161,22 +161,37 @@ def defvjp(function, *vjps):
         primitive_vjps[function][argnum] =  vjp
 
 def add_left_rule(g, result, x, y):
-    return g
+    return unbroadcast(x, g)
 
 def add_right_rule(g, result, x, y):
-    return g
+    return unbroadcast(y, g)
+
+def sub_left_rule(g, result, x, y):
+    return unbroadcast(x, g)
+
+def sub_right_rule(g, result, x, y):
+    return unbroadcast(y, -g)
 
 def mul_left_rule(g, result, x, y):
-    return g * y
+    return unbroadcast(x, g * y)
 
 def mul_right_rule(g, result, x, y):
-    return g * x
+    return unbroadcast(y, g * x)
 
 def div_left_rule(g, result, x, y):
-    return g / y
+    return unbroadcast(x, g / y)
 
 def div_right_rule(g, result, x, y):
-    return (-1) * g * x / y**2
+    return unbroadcast(y, -g * x / y**2)
+
+def neg_rule(g, result, x):
+    return -g
+
+def exp_rule(g, result, x):
+    return g * result
+
+def log_rule(g, result, x):
+    return g / x
 
 def topological_sort(end_node):
     topo = []
@@ -294,10 +309,26 @@ def make_vjp(function, x):
     return vjp, result
 
 
+def unbroadcast(target, gradient):
+    target_shape = onp.shape(target)
+
+    while onp.ndim(gradient) > len(target_shape):
+        gradient = onp.sum(gradient, axis=0)
+
+    for axis, size in enumerate(target_shape):
+        if size == 1 and onp.shape(gradient)[axis] != 1:
+            gradient = onp.sum(gradient, axis=axis, keepdims=True)
+
+    return onp.reshape(gradient, target_shape)
+
+
 defvjp(add, add_left_rule, add_right_rule)
+defvjp(subtract, sub_left_rule, sub_right_rule)
 defvjp(multiply, mul_left_rule, mul_right_rule)
 defvjp(divide, div_left_rule, div_right_rule)
-
+defvjp(negative, neg_rule)
+defvjp(exp, exp_rule)
+defvjp(log, log_rule)
 
 if __name__ == '__main__':
     a = multiply(Box(2.0, Node.new_root()), 6.0)
