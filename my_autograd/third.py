@@ -193,6 +193,10 @@ def exp_rule(g, result, x):
 def log_rule(g, result, x):
     return g / x
 
+def sum_vjp(g, result, x, axis=None, keepdims=False):
+    g = onp.reshape(g, x.shape)
+    return g * onp.ones_like(x)
+
 def topological_sort(end_node):
     topo = []
     visited = set()
