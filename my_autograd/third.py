@@ -194,7 +194,22 @@ def log_rule(g, result, x):
     return g / x
 
 def sum_vjp(g, result, x, axis=None, keepdims=False):
-    g = onp.reshape(g, x.shape)
+    # Если суммировали все элементы, g уже является скаляром.
+    if axis is None:
+        return g * onp.ones_like(x)
+
+    # Приводим одну ось к кортежу, чтобы одинаково обработать
+    # axis=1 и axis=(0, 1).
+    axes = (axis,) if isinstance(axis, (int, onp.integer)) else tuple(axis)
+
+    if not keepdims and axes:
+        # Преобразуем отрицательные оси, например -1, в положительные.
+        axes = tuple(ax % onp.ndim(x) for ax in axes)
+
+        # Восстанавливаем удалённые оси с размером 1.
+        g = onp.expand_dims(g, axis=axes)
+
+    # NumPy растягивает g до исходной формы x.
     return g * onp.ones_like(x)
 
 def topological_sort(end_node):
