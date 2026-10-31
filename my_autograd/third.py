@@ -212,6 +212,13 @@ def sum_vjp(g, result, x, axis=None, keepdims=False):
     # NumPy растягивает g до исходной формы x.
     return g * onp.ones_like(x)
 
+def reshape_vjp(g, result, x, shape):
+    return onp.reshape(g, onp.shape(x))
+
+def transpose_vjp(g, result, x):
+    return onp.transpose(g)
+
+
 def topological_sort(end_node):
     topo = []
     visited = set()
@@ -348,6 +355,11 @@ defvjp(divide, div_left_rule, div_right_rule)
 defvjp(negative, neg_rule)
 defvjp(exp, exp_rule)
 defvjp(log, log_rule)
+defvjp(sum_, sum_vjp)
+defvjp(reshape, reshape_vjp)
+defvjp(transpose, transpose_vjp)
+
+
 
 if __name__ == '__main__':
     a = multiply(Box(2.0, Node.new_root()), 6.0)
